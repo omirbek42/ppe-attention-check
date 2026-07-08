@@ -1,0 +1,756 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Система проверки СИЗ и внимания</title>
+<script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+  :root{
+    --primary:#667eea;
+    --primary-dark:#764ba2;
+    --ok:#4CAF50;
+    --error:#f44336;
+    --warn:#ff9800;
+    --info:#2196F3;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    font-family:'Segoe UI',Roboto,Arial,sans-serif;
+    background:linear-gradient(135deg,var(--primary) 0%,var(--primary-dark) 100%);
+    min-height:100vh;
+    color:#222;
+  }
+  .app{max-width:1400px;margin:0 auto;padding:24px;}
+  header{text-align:center;color:#fff;margin-bottom:24px;}
+  header h1{margin:0 0 6px;font-size:2rem;}
+  header .subtitle{margin:0;opacity:.9;font-size:.95rem;}
+
+  .main-grid{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:20px;
+    margin-bottom:20px;
+  }
+  @media (max-width:1024px){ .main-grid{grid-template-columns:1fr;} }
+
+  .card{
+    background:#fff;
+    border-radius:14px;
+    padding:18px;
+    box-shadow:0 6px 24px rgba(0,0,0,.18);
+  }
+
+  .video-wrapper{
+    position:relative;
+    width:100%;
+    aspect-ratio:4/3;
+    background:#111;
+    border-radius:10px;
+    overflow:hidden;
+  }
+  #video,#overlay{
+    position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;
+  }
+  #overlay{pointer-events:none;}
+
+  .controls{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px;}
+  button{
+    font-size:.95rem;
+    padding:10px 16px;
+    border:none;
+    border-radius:8px;
+    cursor:pointer;
+    font-weight:600;
+    transition:transform .1s, opacity .2s;
+    color:#fff;
+  }
+  button:active{transform:scale(.97);}
+  button:disabled{opacity:.5;cursor:not-allowed;}
+  #startBtn{background:var(--ok);}
+  #stopBtn{background:var(--error);}
+  #testBtn{background:var(--info);}
+  #clearBtn{background:#888;font-size:.8rem;padding:6px 12px;}
+
+  .loading-msg{margin-top:10px;font-size:.85rem;color:var(--info);font-weight:600;}
+
+  .overall-status{
+    text-align:center;
+    font-size:1.3rem;
+    font-weight:700;
+    padding:20px;
+    border-radius:10px;
+    color:#fff;
+    margin-bottom:16px;
+    transition:background .3s;
+  }
+  .status-ready{background:var(--ok);}
+  .status-fix{background:var(--warn);}
+  .status-checking{background:var(--info);}
+
+  .indicators{display:flex;flex-direction:column;gap:10px;}
+  .indicator{
+    display:flex;align-items:center;gap:10px;
+    padding:12px 14px;border-radius:8px;background:#f4f5f9;
+    font-weight:600;
+  }
+  .indicator.hidden{display:none;}
+  .ind-icon{font-size:1.3rem;}
+  .ind-label{flex:1;}
+  .ind-value{font-weight:700;}
+  .indicator.ok{background:#e8f5e9;color:var(--ok);}
+  .indicator.bad{background:#ffebee;color:var(--error);}
+
+  .stats-grid{
+    display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:20px;
+  }
+  @media (max-width:768px){ .stats-grid{grid-template-columns:1fr 1fr;} }
+  .stat-card{
+    background:#fff;border-radius:12px;padding:16px;text-align:center;
+    box-shadow:0 4px 14px rgba(0,0,0,.15);
+  }
+  .stat-card .value{font-size:1.8rem;font-weight:800;color:var(--primary);}
+  .stat-card .label{font-size:.8rem;color:#666;margin-top:4px;}
+
+  .dashboard{display:grid;grid-template-columns:1fr 1fr;gap:20px;}
+  @media (max-width:1024px){ .dashboard{grid-template-columns:1fr;} }
+
+  table{width:100%;border-collapse:collapse;font-size:.82rem;}
+  th,td{text-align:left;padding:6px 8px;border-bottom:1px solid #eee;}
+  th{color:#888;font-weight:600;}
+  .log-card{max-height:340px;display:flex;flex-direction:column;}
+  .log-body-wrap{overflow-y:auto;max-height:250px;}
+  .log-actions{display:flex;justify-content:flex-end;margin-bottom:8px;}
+
+  .modal-overlay{
+    position:fixed;inset:0;background:rgba(0,0,0,.6);
+    display:flex;align-items:center;justify-content:center;z-index:1000;padding:16px;
+  }
+  .modal-overlay.hidden{display:none;}
+  .modal-box{
+    background:#fff;border-radius:16px;padding:28px;max-width:520px;width:100%;
+    max-height:90vh;overflow-y:auto;
+  }
+  .modal-box h2{margin-top:0;color:var(--primary-dark);}
+  .modal-box .hidden{display:none;}
+  .task-list{list-style:none;padding:0;}
+  .task-list li{padding:8px 0;border-bottom:1px solid #eee;}
+  .modal-actions{display:flex;gap:10px;margin-top:20px;}
+  .modal-actions button{flex:1;}
+  #btnCancelTest{background:#888;}
+  #btnCancelRunning{background:#888;}
+  #btnCloseResults{background:var(--primary);}
+  #btnRestartResults{background:var(--ok);}
+
+  .task-instruction{
+    text-align:center;font-size:1.4rem;font-weight:700;margin:10px 0;color:var(--primary-dark);
+  }
+  .task-progress{text-align:center;color:#888;margin-bottom:10px;}
+  .task-live{
+    text-align:center;font-size:1.1rem;padding:14px;border-radius:10px;background:#f4f5f9;margin:14px 0;
+  }
+  #resultsTable td.pass{color:var(--ok);font-weight:700;}
+  #resultsTable td.fail{color:var(--error);font-weight:700;}
+  .score-summary{text-align:center;font-size:1.5rem;font-weight:800;margin:14px 0;color:var(--primary);}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>🛡️ Система проверки СИЗ и внимания</h1>
+    <p class="subtitle">100% локальная обработка в браузере — видео никуда не отправляется</p>
+  </header>
+
+  <div class="main-grid">
+    <section class="card">
+      <div class="video-wrapper">
+        <video id="video" autoplay muted playsinline></video>
+        <canvas id="overlay"></canvas>
+      </div>
+      <div class="controls">
+        <button id="startBtn" disabled>▶️ Начать проверку</button>
+        <button id="stopBtn" disabled>⏹️ Остановить</button>
+        <button id="testBtn" disabled>🧠 Тест внимания</button>
+      </div>
+      <p id="loadingMsg" class="loading-msg">⏳ Загрузка моделей... (может занять до 30 сек)</p>
+    </section>
+
+    <section class="card">
+      <div id="overallStatus" class="overall-status status-checking">🔵 ОЖИДАНИЕ ЗАПУСКА</div>
+      <div class="indicators">
+        <div class="indicator" id="ind-face"><span class="ind-icon">👤</span><span class="ind-label">Лицо видно</span><span class="ind-value">—</span></div>
+        <div class="indicator" id="ind-eyes"><span class="ind-icon">👁️</span><span class="ind-label">Глаза открыты</span><span class="ind-value">—</span></div>
+        <div class="indicator" id="ind-glasses"><span class="ind-icon">🥽</span><span class="ind-label">Защитные очки</span><span class="ind-value">—</span></div>
+        <div class="indicator" id="ind-helmet"><span class="ind-icon">🪖</span><span class="ind-label">Каска</span><span class="ind-value">—</span></div>
+        <div class="indicator hidden" id="ind-hands"><span class="ind-icon">👐</span><span class="ind-label">Руки видны</span><span class="ind-value">—</span></div>
+        <div class="indicator hidden" id="ind-gesture"><span class="ind-icon">🤚</span><span class="ind-label">Жест / пальцы</span><span class="ind-value">—</span></div>
+      </div>
+    </section>
+  </div>
+
+  <div class="stats-grid">
+    <div class="stat-card"><div class="value" id="statTotal">0</div><div class="label">Проверок (всего)</div></div>
+    <div class="stat-card"><div class="value" id="statSuccess">0</div><div class="label">Успешно</div></div>
+    <div class="stat-card"><div class="value" id="statErrors">0</div><div class="label">Ошибок</div></div>
+    <div class="stat-card"><div class="value" id="statReadiness">0%</div><div class="label">Готовность</div></div>
+  </div>
+
+  <div class="dashboard">
+    <div class="card">
+      <h3>📈 История проверок</h3>
+      <canvas id="historyChart" height="180"></canvas>
+    </div>
+    <div class="card log-card">
+      <h3>📋 Лог событий</h3>
+      <div class="log-actions"><button id="clearBtn">🗑️ Очистить кэш</button></div>
+      <div class="log-body-wrap">
+        <table>
+          <thead><tr><th>Время</th><th>Событие</th></tr></thead>
+          <tbody id="logBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="testModal" class="modal-overlay hidden">
+  <div class="modal-box">
+    <div id="testIntro">
+      <h2>🧠 Тест внимания</h2>
+      <p>Тест состоит из 5 заданий на координацию и внимательность. Выполняйте задание перед камерой и нажимайте «Готово», когда посчитаете, что оно выполнено.</p>
+      <ul class="task-list">
+        <li>1️⃣ Показать 2 пальца</li>
+        <li>2️⃣ Показать 3 пальца</li>
+        <li>3️⃣ Показать 4 пальца</li>
+        <li>4️⃣ Закрыть левый глаз</li>
+        <li>5️⃣ Закрыть правый глаз</li>
+      </ul>
+      <div class="modal-actions">
+        <button id="btnCancelTest">Отменить</button>
+        <button id="btnStartTest" style="background:var(--ok);">▶️ Начать</button>
+      </div>
+    </div>
+
+    <div id="testRunning" class="hidden">
+      <div class="task-progress" id="taskProgress">Задание 1 из 5</div>
+      <div class="task-instruction" id="taskInstruction">Покажите 2 пальца</div>
+      <div class="task-live" id="taskLive">Ожидание жеста...</div>
+      <div class="modal-actions">
+        <button id="btnCancelRunning">Отменить</button>
+        <button id="btnTaskDone" style="background:var(--ok);">✅ Готово</button>
+      </div>
+    </div>
+
+    <div id="testResults" class="hidden">
+      <h2>📊 Результаты теста</h2>
+      <table id="resultsTable">
+        <thead><tr><th>Задание</th><th>Результат</th></tr></thead>
+        <tbody id="resultsBody"></tbody>
+      </table>
+      <div class="score-summary" id="scoreSummary"></div>
+      <div class="modal-actions">
+        <button id="btnRestartResults">🔄 Повторить</button>
+        <button id="btnCloseResults">Закрыть</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const MODEL_URL = 'https://justadudewhohacks.github.io/face-api.js/models';
+
+  const video = document.getElementById('video');
+  const overlay = document.getElementById('overlay');
+  const octx = overlay.getContext('2d');
+  const analysisCanvas = document.createElement('canvas');
+  const actx = analysisCanvas.getContext('2d', { willReadFrequently: true });
+
+  const startBtn = document.getElementById('startBtn');
+  const stopBtn = document.getElementById('stopBtn');
+  const testBtn = document.getElementById('testBtn');
+  const loadingMsg = document.getElementById('loadingMsg');
+  const overallStatusEl = document.getElementById('overallStatus');
+  const clearBtn = document.getElementById('clearBtn');
+
+  const indFace = document.getElementById('ind-face');
+  const indEyes = document.getElementById('ind-eyes');
+  const indGlasses = document.getElementById('ind-glasses');
+  const indHelmet = document.getElementById('ind-helmet');
+  const indHands = document.getElementById('ind-hands');
+  const indGesture = document.getElementById('ind-gesture');
+
+  const statTotal = document.getElementById('statTotal');
+  const statSuccess = document.getElementById('statSuccess');
+  const statErrors = document.getElementById('statErrors');
+  const statReadiness = document.getElementById('statReadiness');
+  const logBody = document.getElementById('logBody');
+
+  const testModal = document.getElementById('testModal');
+  const testIntro = document.getElementById('testIntro');
+  const testRunning = document.getElementById('testRunning');
+  const testResults = document.getElementById('testResults');
+  const taskProgress = document.getElementById('taskProgress');
+  const taskInstruction = document.getElementById('taskInstruction');
+  const taskLive = document.getElementById('taskLive');
+  const resultsBody = document.getElementById('resultsBody');
+  const scoreSummary = document.getElementById('scoreSummary');
+
+  const state = {
+    running: false,
+    modelsReady: false,
+    stats: { total: 0, success: 0, errors: 0 },
+    lastFlags: { face: null, eyes: null, glasses: null, helmet: null },
+    hands: null,
+    handsBusy: false,
+    lastHandsResult: null,
+    testActive: false
+  };
+
+  const TASKS = [
+    { type: 'fingers', target: 2, label: 'Покажите 2 пальца' },
+    { type: 'fingers', target: 3, label: 'Покажите 3 пальца' },
+    { type: 'fingers', target: 4, label: 'Покажите 4 пальца' },
+    { type: 'eye', target: 'left', label: 'Закройте левый глаз' },
+    { type: 'eye', target: 'right', label: 'Закройте правый глаз' }
+  ];
+  let testTaskIndex = 0;
+  let testResultsData = [];
+
+  function nowStr(){
+    return new Date().toLocaleTimeString('ru-RU');
+  }
+
+  function addLog(message){
+    const row = document.createElement('tr');
+    row.innerHTML = `<td>${nowStr()}</td><td>${message}</td>`;
+    logBody.prepend(row);
+    while (logBody.children.length > 20) logBody.removeChild(logBody.lastChild);
+    persist();
+  }
+
+  function persist(){
+    try{
+      localStorage.setItem('siz_stats', JSON.stringify(state.stats));
+      localStorage.setItem('siz_log', logBody.innerHTML);
+    }catch(e){}
+  }
+
+  function restore(){
+    try{
+      const s = localStorage.getItem('siz_stats');
+      if (s){ state.stats = JSON.parse(s); }
+      const l = localStorage.getItem('siz_log');
+      if (l){ logBody.innerHTML = l; }
+    }catch(e){}
+    updateStatsUI();
+  }
+
+  clearBtn.addEventListener('click', () => {
+    localStorage.removeItem('siz_stats');
+    localStorage.removeItem('siz_log');
+    state.stats = { total: 0, success: 0, errors: 0 };
+    logBody.innerHTML = '';
+    updateStatsUI();
+    addLog('🗑️ Кэш и статистика очищены');
+  });
+
+  function updateStatsUI(){
+    statTotal.textContent = state.stats.total;
+    statSuccess.textContent = state.stats.success;
+    statErrors.textContent = state.stats.errors;
+    const readiness = state.stats.total ? Math.round((state.stats.success / state.stats.total) * 100) : 0;
+    statReadiness.textContent = readiness + '%';
+  }
+
+  function setIndicator(el, ok, text){
+    el.classList.remove('ok','bad');
+    el.classList.add(ok ? 'ok' : 'bad');
+    el.querySelector('.ind-value').textContent = text;
+  }
+
+  // Chart setup
+  const chartCtx = document.getElementById('historyChart').getContext('2d');
+  const historyChart = new Chart(chartCtx, {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: [{
+        label: 'Готовность (%)',
+        data: [],
+        borderColor: '#667eea',
+        backgroundColor: 'rgba(102,126,234,0.15)',
+        tension: 0.3,
+        fill: true
+      }]
+    },
+    options: {
+      responsive: true,
+      scales: { y: { min: 0, max: 100 } },
+      plugins: { legend: { display: false } }
+    }
+  });
+
+  function pushChartPoint(value){
+    const labels = historyChart.data.labels;
+    const data = historyChart.data.datasets[0].data;
+    labels.push(nowStr());
+    data.push(value);
+    if (labels.length > 30){ labels.shift(); data.shift(); }
+    historyChart.update('none');
+  }
+
+  // --- Model loading ---
+  async function loadModels(){
+    try{
+      await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+      await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
+
+      state.hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
+      state.hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.6, minTrackingConfidence: 0.5 });
+      state.hands.onResults(onHandsResults);
+
+      state.modelsReady = true;
+      loadingMsg.textContent = '✅ Модели загружены. Можно начинать проверку.';
+      startBtn.disabled = false;
+    }catch(err){
+      console.error(err);
+      loadingMsg.textContent = '❌ Ошибка загрузки моделей: ' + err.message;
+    }
+  }
+
+  // --- Camera control ---
+  async function startCamera(){
+    try{
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+      video.srcObject = stream;
+      await video.play();
+      overlay.width = analysisCanvas.width = video.videoWidth || 640;
+      overlay.height = analysisCanvas.height = video.videoHeight || 480;
+      state.running = true;
+      startBtn.disabled = true;
+      stopBtn.disabled = false;
+      testBtn.disabled = false;
+      overallStatusEl.className = 'overall-status status-checking';
+      overallStatusEl.textContent = '🔵 ПРОВЕРКА...';
+      addLog('▶️ Камера запущена');
+      loop();
+    }catch(err){
+      console.error(err);
+      loadingMsg.textContent = '❌ Не удалось получить доступ к камере: ' + err.message;
+    }
+  }
+
+  function stopCamera(){
+    state.running = false;
+    if (video.srcObject){
+      video.srcObject.getTracks().forEach(t => t.stop());
+      video.srcObject = null;
+    }
+    stopBtn.disabled = true;
+    startBtn.disabled = false;
+    testBtn.disabled = true;
+    octx.clearRect(0, 0, overlay.width, overlay.height);
+    overallStatusEl.className = 'overall-status status-checking';
+    overallStatusEl.textContent = '🔵 ОСТАНОВЛЕНО';
+    addLog('⏹️ Камера остановлена');
+  }
+
+  startBtn.addEventListener('click', startCamera);
+  stopBtn.addEventListener('click', stopCamera);
+
+  // --- Eye / glasses / helmet analysis ---
+  function dist(a, b){ return Math.hypot(a.x - b.x, a.y - b.y); }
+
+  function eyeOpenness(pts){
+    const width = dist(pts[0], pts[3]);
+    const h1 = dist(pts[1], pts[5]);
+    const h2 = dist(pts[2], pts[4]);
+    const avg = (h1 + h2) / 2;
+    const threshold = width * 0.06 + 4;
+    return { open: avg > threshold, avg, width, threshold };
+  }
+
+  function regionDarkRatio(x, y, w, h, brightnessThreshold){
+    x = Math.max(0, Math.round(x));
+    y = Math.max(0, Math.round(y));
+    w = Math.max(1, Math.round(w));
+    h = Math.max(1, Math.round(h));
+    if (x + w > analysisCanvas.width) w = analysisCanvas.width - x;
+    if (y + h > analysisCanvas.height) h = analysisCanvas.height - y;
+    if (w <= 0 || h <= 0) return 0;
+    let data;
+    try{
+      data = actx.getImageData(x, y, w, h).data;
+    }catch(e){ return 0; }
+    let dark = 0;
+    const total = data.length / 4;
+    for (let i = 0; i < data.length; i += 4){
+      const lum = 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
+      if (lum < brightnessThreshold) dark++;
+    }
+    return total ? dark / total : 0;
+  }
+
+  function drawFaceOverlay(box, landmarks){
+    octx.strokeStyle = '#4CAF50';
+    octx.lineWidth = 2;
+    octx.strokeRect(box.x, box.y, box.width, box.height);
+    octx.fillStyle = '#2196F3';
+    landmarks.positions.forEach(p => {
+      octx.beginPath();
+      octx.arc(p.x, p.y, 1.5, 0, Math.PI * 2);
+      octx.fill();
+    });
+  }
+
+  async function analyzeFace(){
+    const result = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 320 })).withFaceLandmarks();
+    if (!result){
+      return { face: false };
+    }
+    const box = result.detection.box;
+    const landmarks = result.landmarks;
+    const leftEyePts = landmarks.getLeftEye();
+    const rightEyePts = landmarks.getRightEye();
+    const leftEye = eyeOpenness(leftEyePts);
+    const rightEye = eyeOpenness(rightEyePts);
+
+    const eyesMinX = Math.min(...leftEyePts.concat(rightEyePts).map(p => p.x));
+    const eyesMaxX = Math.max(...leftEyePts.concat(rightEyePts).map(p => p.x));
+    const eyesMinY = Math.min(...leftEyePts.concat(rightEyePts).map(p => p.y));
+    const eyesMaxY = Math.max(...leftEyePts.concat(rightEyePts).map(p => p.y));
+    const padX = (eyesMaxX - eyesMinX) * 0.25;
+    const padY = (eyesMaxY - eyesMinY) * 0.6;
+    const glassesRatio = regionDarkRatio(eyesMinX - padX, eyesMinY - padY, (eyesMaxX - eyesMinX) + padX * 2, (eyesMaxY - eyesMinY) + padY * 2, 100);
+    const glasses = glassesRatio > 0.25;
+
+    const foreheadH = box.height * 0.35;
+    const helmetRatio = regionDarkRatio(box.x, box.y - foreheadH, box.width, foreheadH, 120);
+    const helmet = helmetRatio > 0.4;
+
+    drawFaceOverlay(box, landmarks);
+
+    return {
+      face: true,
+      leftEyeOpen: leftEye.open,
+      rightEyeOpen: rightEye.open,
+      eyesOpen: leftEye.open && rightEye.open,
+      glasses, glassesRatio,
+      helmet, helmetRatio
+    };
+  }
+
+  // --- Hands ---
+  function onHandsResults(results){
+    state.lastHandsResult = results;
+    if (results.multiHandLandmarks && results.multiHandLandmarks.length && window.drawConnectors){
+      results.multiHandLandmarks.forEach(lm => {
+        drawConnectors(octx, lm, Hands.HAND_CONNECTIONS, { color: '#764ba2', lineWidth: 2 });
+        drawLandmarks(octx, lm, { color: '#2196F3', lineWidth: 1, radius: 2 });
+      });
+    }
+  }
+
+  function countFingers(landmarks){
+    const tips = [8, 12, 16, 20];
+    const pips = [6, 10, 14, 18];
+    let count = 0;
+    for (let i = 0; i < tips.length; i++){
+      if (landmarks[tips[i]].y < landmarks[pips[i]].y) count++;
+    }
+    const thumbTip = landmarks[4];
+    const thumbIp = landmarks[3];
+    const wrist = landmarks[0];
+    if (Math.abs(thumbTip.x - wrist.x) > Math.abs(thumbIp.x - wrist.x) + 0.02) count++;
+    return count;
+  }
+
+  function totalFingersFromResults(results){
+    if (!results || !results.multiHandLandmarks) return 0;
+    let total = 0;
+    results.multiHandLandmarks.forEach(lm => { total += countFingers(lm); });
+    return total;
+  }
+
+  // --- Main loop ---
+  async function loop(){
+    if (!state.running) return;
+    actx.drawImage(video, 0, 0, analysisCanvas.width, analysisCanvas.height);
+    octx.clearRect(0, 0, overlay.width, overlay.height);
+
+    const face = await analyzeFace();
+
+    if (state.testActive && state.hands && !state.handsBusy){
+      state.handsBusy = true;
+      try{ await state.hands.send({ image: video }); }catch(e){}
+      state.handsBusy = false;
+    }
+
+    updateOverallStatus(face);
+    if (state.testActive) updateTestLive(face);
+
+    requestAnimationFrame(loop);
+  }
+
+  function updateOverallStatus(face){
+    state.stats.total++;
+
+    if (!face.face){
+      setIndicator(indFace, false, '✗ Не видно');
+      setIndicator(indEyes, false, '—');
+      setIndicator(indGlasses, false, '—');
+      setIndicator(indHelmet, false, '—');
+      overallStatusEl.className = 'overall-status status-fix';
+      overallStatusEl.textContent = '🟠 ТРЕБУЮТСЯ ИСПРАВЛЕНИЯ: лицо не видно';
+      state.stats.errors++;
+      if (state.lastFlags.face !== false){ addLog('👤 Лицо потеряно из вида'); state.lastFlags.face = false; }
+      updateStatsUI();
+      pushChartPoint(0);
+      return;
+    }
+    if (state.lastFlags.face !== true){ addLog('👤 Лицо обнаружено'); state.lastFlags.face = true; }
+
+    setIndicator(indFace, true, '✓ Видно');
+    setIndicator(indEyes, face.eyesOpen, face.eyesOpen ? '✓ Открыты' : (!face.leftEyeOpen && !face.rightEyeOpen ? '✗ Закрыты' : (!face.leftEyeOpen ? '✗ Левый закрыт' : '✗ Правый закрыт')));
+    setIndicator(indGlasses, face.glasses, face.glasses ? '✓ Надеты' : '✗ Не видны');
+    setIndicator(indHelmet, face.helmet, face.helmet ? '✓ Надета' : '✗ Не видна');
+
+    if (state.lastFlags.eyes !== face.eyesOpen){ addLog(face.eyesOpen ? '👁️ Глаза открыты' : '👁️ Обнаружены закрытые глаза'); state.lastFlags.eyes = face.eyesOpen; }
+    if (state.lastFlags.glasses !== face.glasses){ addLog(face.glasses ? '🥽 Очки надеты' : '🥽 Очки не обнаружены'); state.lastFlags.glasses = face.glasses; }
+    if (state.lastFlags.helmet !== face.helmet){ addLog(face.helmet ? '🪖 Каска надета' : '🪖 Каска не обнаружена'); state.lastFlags.helmet = face.helmet; }
+
+    const ready = face.eyesOpen && face.glasses && face.helmet;
+    const readinessScore = Math.round(((face.face?1:0) + (face.eyesOpen?1:0) + (face.glasses?1:0) + (face.helmet?1:0)) / 4 * 100);
+
+    if (ready){
+      overallStatusEl.className = 'overall-status status-ready';
+      overallStatusEl.textContent = '🟢 ГОТОВ К РАБОТЕ';
+      state.stats.success++;
+    } else {
+      overallStatusEl.className = 'overall-status status-fix';
+      const missing = [];
+      if (!face.eyesOpen) missing.push('глаза');
+      if (!face.glasses) missing.push('очки');
+      if (!face.helmet) missing.push('каска');
+      overallStatusEl.textContent = '🟠 ТРЕБУЮТСЯ ИСПРАВЛЕНИЯ: ' + missing.join(', ');
+      state.stats.errors++;
+    }
+    updateStatsUI();
+    pushChartPoint(readinessScore);
+  }
+
+  // --- Attention test ---
+  testBtn.addEventListener('click', () => {
+    testModal.classList.remove('hidden');
+    showPhase('intro');
+  });
+
+  function showPhase(phase){
+    testIntro.classList.toggle('hidden', phase !== 'intro');
+    testRunning.classList.toggle('hidden', phase !== 'running');
+    testResults.classList.toggle('hidden', phase !== 'results');
+    state.testActive = (phase === 'running');
+    indHands.classList.toggle('hidden', phase !== 'running');
+    indGesture.classList.toggle('hidden', phase !== 'running');
+  }
+
+  document.getElementById('btnCancelTest').addEventListener('click', () => {
+    testModal.classList.add('hidden');
+    state.testActive = false;
+  });
+  document.getElementById('btnCancelRunning').addEventListener('click', () => {
+    testModal.classList.add('hidden');
+    state.testActive = false;
+    addLog('🧠 Тест внимания отменён');
+  });
+  document.getElementById('btnCloseResults').addEventListener('click', () => {
+    testModal.classList.add('hidden');
+  });
+  document.getElementById('btnRestartResults').addEventListener('click', () => {
+    startTest();
+  });
+  document.getElementById('btnStartTest').addEventListener('click', startTest);
+
+  function startTest(){
+    testTaskIndex = 0;
+    testResultsData = [];
+    showPhase('running');
+    renderCurrentTask();
+    addLog('🧠 Тест внимания начат');
+  }
+
+  function renderCurrentTask(){
+    const task = TASKS[testTaskIndex];
+    taskProgress.textContent = `Задание ${testTaskIndex + 1} из ${TASKS.length}`;
+    taskInstruction.textContent = task.label;
+  }
+
+  function updateTestLive(face){
+    const task = TASKS[testTaskIndex];
+    if (!task) return;
+    if (task.type === 'fingers'){
+      const total = totalFingersFromResults(state.lastHandsResult);
+      setIndicator(indHands, !!(state.lastHandsResult && state.lastHandsResult.multiHandLandmarks && state.lastHandsResult.multiHandLandmarks.length), state.lastHandsResult && state.lastHandsResult.multiHandLandmarks && state.lastHandsResult.multiHandLandmarks.length ? '✓ Видны' : '✗ Не видны');
+      setIndicator(indGesture, total === task.target, `Показано: ${total}`);
+      taskLive.textContent = `Показано пальцев: ${total} (нужно: ${task.target})`;
+    } else if (task.type === 'eye'){
+      indHands.classList.add('hidden');
+      const leftClosed = !face.leftEyeOpen && face.rightEyeOpen;
+      const rightClosed = !face.rightEyeOpen && face.leftEyeOpen;
+      const okNow = task.target === 'left' ? leftClosed : rightClosed;
+      setIndicator(indGesture, okNow, okNow ? '✓ Выполнено' : '✗ Не выполнено');
+      taskLive.textContent = task.target === 'left'
+        ? `Левый глаз: ${face.leftEyeOpen ? 'открыт' : 'закрыт'} / Правый: ${face.rightEyeOpen ? 'открыт' : 'закрыт'}`
+        : `Правый глаз: ${face.rightEyeOpen ? 'открыт' : 'закрыт'} / Левый: ${face.leftEyeOpen ? 'открыт' : 'закрыт'}`;
+    }
+  }
+
+  document.getElementById('btnTaskDone').addEventListener('click', () => {
+    const task = TASKS[testTaskIndex];
+    let success = false;
+    if (task.type === 'fingers'){
+      success = totalFingersFromResults(state.lastHandsResult) === task.target;
+    } else if (task.type === 'eye'){
+      success = indGesture.classList.contains('ok');
+    }
+    testResultsData.push({ label: task.label, success });
+    testTaskIndex++;
+    if (testTaskIndex < TASKS.length){
+      renderCurrentTask();
+    } else {
+      finishTest();
+    }
+  });
+
+  function finishTest(){
+    showPhase('results');
+    resultsBody.innerHTML = '';
+    testResultsData.forEach(r => {
+      const row = document.createElement('tr');
+      row.innerHTML = `<td>${r.label}</td><td class="${r.success ? 'pass' : 'fail'}">${r.success ? '✓ Выполнено' : '✗ Не выполнено'}</td>`;
+      resultsBody.appendChild(row);
+    });
+    const successCount = testResultsData.filter(r => r.success).length;
+    const percent = Math.round((successCount / TASKS.length) * 100);
+    let verdict;
+    if (percent === 100) verdict = '🏆 Идеально';
+    else if (percent >= 80) verdict = '🎉 Отлично';
+    else if (percent >= 60) verdict = '👍 Хорошо';
+    else if (percent >= 40) verdict = '⚠️ Нужна практика';
+    else verdict = '💪 Потренируйтесь';
+    scoreSummary.textContent = `${successCount}/${TASKS.length} (${percent}%) — ${verdict}`;
+    addLog(`🧠 Тест завершён: ${successCount}/${TASKS.length} (${percent}%)`);
+  }
+
+  // --- Init ---
+  restore();
+  loadModels();
+})();
+</script>
+</body>
+</html>
