@@ -85,6 +85,9 @@
   .ai-card-header h3{margin:0;}
   #aiKeyBtn{background:#888;font-size:.75rem;padding:6px 12px;}
   .ai-explanation{background:#f4f5f9;border-radius:8px;padding:12px 14px;margin-top:12px;font-size:.9rem;line-height:1.5;}
+  .ai-description-block{margin-top:12px;}
+  .ai-description-block h4{margin:0 0 6px;font-size:.85rem;color:#666;}
+  .ai-description{background:#ede7f6;border-radius:8px;padding:12px 14px;font-size:.9rem;line-height:1.6;white-space:pre-line;}
   .ai-meta{margin-top:8px;font-size:.75rem;color:#999;text-align:right;}
 
   .overall-status{
@@ -216,6 +219,10 @@
       <div class="indicator" id="ai-ind-helmet"><span class="ind-icon">🪖</span><span class="ind-label">Каска</span><span class="ind-value">—</span></div>
     </div>
     <div class="ai-explanation" id="aiExplanation">—</div>
+    <div class="ai-description-block">
+      <h4>📝 Общее описание сотрудника</h4>
+      <div class="ai-description" id="aiDescription">—</div>
+    </div>
     <div class="ai-meta" id="aiMeta"></div>
   </div>
 
@@ -322,6 +329,7 @@
   const aiKeyBtn = document.getElementById('aiKeyBtn');
   const aiBanner = document.getElementById('aiBanner');
   const aiExplanation = document.getElementById('aiExplanation');
+  const aiDescription = document.getElementById('aiDescription');
   const aiMeta = document.getElementById('aiMeta');
   const aiInd = {
     face: document.getElementById('ai-ind-face'),
@@ -792,7 +800,7 @@
   // --- AI analysis (GLM-4.6V via Z.ai) ---
   const GLM_ENDPOINT = 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
   const GLM_MODEL = 'glm-4.6v';
-  const AI_PROMPT = 'Ты - система контроля охраны труда. Проанализируй фотографию человека перед камерой и оцени его готовность к работе на опасном производственном участке. Проверь четыре параметра: 1) видно ли лицо в кадре (face_visible), 2) открыты ли оба глаза (eyes_open), 3) надеты ли защитные очки (glasses), 4) надета ли защитная каска (helmet). Итоговый статус ready = true только если все четыре параметра положительны. Ответь СТРОГО одним JSON-объектом без markdown-разметки и без текста до или после него, в формате: {"face_visible":true|false,"eyes_open":true|false,"glasses":true|false,"helmet":true|false,"ready":true|false,"explanation":"краткое пояснение на русском языке, 1-2 предложения"}';
+  const AI_PROMPT = 'Ты - система контроля охраны труда. Проанализируй фотографию человека перед камерой и оцени его готовность к работе на опасном производственном участке. Проверь четыре параметра: 1) видно ли лицо в кадре (face_visible), 2) открыты ли оба глаза (eyes_open), 3) надеты ли защитные очки (glasses), 4) надета ли защитная каска (helmet). Итоговый статус ready = true только если все четыре параметра положительны. Дополнительно опиши общую картину по кадру: где находится человек (помещение/улица/производство/офис и т.д., что видно на фоне), как он выглядит (примерный возраст, поза, выражение лица), во что одет (тип одежды, цвет, спецодежда или обычная), какие ещё аксессуары или предметы видны (очки, головные уборы, украшения, наушники, инструменты, телефон в руках и т.д.). Ответь СТРОГО одним JSON-объектом без markdown-разметки и без текста до или после него, в формате: {"face_visible":true|false,"eyes_open":true|false,"glasses":true|false,"helmet":true|false,"ready":true|false,"explanation":"краткое пояснение по готовности на русском языке, 1-2 предложения","scene_description":"развёрнутое описание на русском языке (4-6 предложений): местоположение/окружение, внешний вид, одежда, аксессуары и предметы в кадре"}';
 
   function getStoredApiKey(){
     try{ return localStorage.getItem('glm_api_key') || ''; }catch(e){ return ''; }
@@ -840,6 +848,7 @@
       aiBanner.className = 'overall-status status-fix';
       aiBanner.textContent = '⚠️ Не удалось разобрать ответ ИИ';
       aiExplanation.textContent = rawText;
+      aiDescription.textContent = '—';
       return;
     }
     setAiIndicator(aiInd.face, parsed.face_visible);
@@ -849,6 +858,7 @@
     aiBanner.className = 'overall-status ' + (parsed.ready ? 'status-ready' : 'status-fix');
     aiBanner.textContent = parsed.ready ? '🟢 ИИ считает: ГОТОВ К РАБОТЕ' : '🟠 ИИ считает: ТРЕБУЮТСЯ ИСПРАВЛЕНИЯ';
     aiExplanation.textContent = parsed.explanation || '—';
+    aiDescription.textContent = parsed.scene_description || '—';
     addLog('🤖 ИИ-анализ: ' + (parsed.ready ? 'готов' : 'требуются исправления'));
   }
 
@@ -865,6 +875,7 @@
     aiBanner.className = 'overall-status status-checking';
     aiBanner.textContent = '⏳ ИИ анализирует кадр...';
     aiExplanation.textContent = '—';
+    aiDescription.textContent = '—';
     aiMeta.textContent = '';
     [aiInd.face, aiInd.eyes, aiInd.glasses, aiInd.helmet].forEach(el => setAiIndicator(el, undefined));
 
@@ -902,6 +913,7 @@
       aiBanner.className = 'overall-status status-fix';
       aiBanner.textContent = '❌ Ошибка запроса к ИИ';
       aiExplanation.textContent = err.message;
+      aiDescription.textContent = '—';
       addLog('🤖 Ошибка ИИ-анализа: ' + err.message);
     }finally{
       aiBtn.disabled = !state.running;
